@@ -12,6 +12,8 @@ import logging
 import warnings
 import re
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 from collections import Counter, defaultdict
 from typing import Dict
@@ -26,6 +28,7 @@ class DataLoader:
         self.config = self._load_config(config_path)
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
+        self.output_dir = Path(self._load_config['data_paths']['output'])
         self.df = None
 
         self.stats = {}
@@ -238,6 +241,37 @@ class DataLoader:
 
         return stats
     
+    def create_visualizations(self) -> None:
+        """
+        Membuat visualisasi dataset
+        """
+
+        logger.info("Creating dataset visualizations")
+
+        if self.df is None:
+            raise ValueError("The dataset has not been loaded. Call load_dataset() first.")
+
+        # Set style
+        plt.style.use('seaborn-v0_8')
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Amazon Dataset Analysis', fontsize=16, fontweight='bold')
+
+        # Distribusi label
+        labels = ['Negative', 'Positive']
+        sizes = [self.stats['label_distribution']['negative'],
+                 self.stats['label_distribution']['positive']
+                ]
+        colors = ['#ff6b6b', '#4ecdc4']
+
+        axes[0, 0].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+
+        plt.tight_layout()
+
+        # Save plot
+        plot_path = self.output_dir / 'dataset_analysis.png'
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Visualizations saved to: {plot_path}")
+
     
     def get_sample_data(self, n: int = 5) -> pd.DataFrame:
         """
