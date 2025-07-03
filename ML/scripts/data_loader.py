@@ -11,7 +11,9 @@ import json
 import logging
 import warnings
 import re
+import numpy as np
 from pathlib import Path
+from collections import Counter, defaultdict
 from typing import Dict
 warnings.filterwarnings('ignore')
 
@@ -25,6 +27,8 @@ class DataLoader:
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
         self.df = None
+
+        self.stats = {}
 
 
     def _load_config(self, config_path: str) -> Dict:
@@ -81,12 +85,12 @@ class DataLoader:
                 # Jika jumlah baris pada current_chunk sudah mencapai ukuran chunk_size(10000), simpan ke variabel data
                 if len(current_chunk) >= chunk_size:
                     # Konversi data ke DataFrame
-                    data.append(pd.DataFrame(current_chunk, columns=['label', 'text']))
+                    data.append(pd.DataFrame(current_chunk, columns=['labels', 'text']))
                     # Reset current_chunk
                     current_chunk = []
             # Simpan sisa baris yang tidak mencapai chunk_size(10000)
             if current_chunk:
-                data.append(pd.DataFrame(current_chunk, columns=['label', 'text']))
+                data.append(pd.DataFrame(current_chunk, columns=['labels', 'text']))
         
         # Gabungkan semua chunk
         self.df = pd.concat(data, ignore_index=True) if data else pd.DataFrame(columns=['label', 'text'])
@@ -165,33 +169,75 @@ class DataLoader:
 
     def analyze_dataset(self) -> Dict:
         """
-        Ana
-        """
-
-
-    def validate_dataset(self) -> Dict:
-        """
-        Validasi struktur dan kualitas dataset
+        Analisis statistik pada dataset
 
         Returns:
-            dict: Informasi validasi dataset
+            Dict: Statistik dataset
         """
+
+        logger.info("Analyzing dataset statistics...")
 
         if self.df is None:
             raise ValueError("The dataset has not been loaded. Call load_dataset() first")
 
-        validation_info = {
-            'total_rows': len(self.df),
+        # Distribusi label
+        positive_dist = [len(label) for label in self.df['labels'] if label == 2 ]
+        negative_dist = [len(label) for label in self.df['labels'] if label == 1]
+
+        # Analisis text length
+        word_counts = [text.split() for text in self.df['text']]
+
+        all_words = []
+        for text in self.df['text']:
+            all_words.extend(text.split())
+        
+        vocabulary = Counter(all_words)
+        unique_words = len(vocabulary)
+        total_words = len(all_words)
+
+
+        stats = {
+            'total_samples': len(self.df['labels']),
             'total_columns': len(self.df.columns),
             'columns': list(self.df.columns),
             'missing_value': self.df.isnull().sum().to_dict(),
             'data_types': self.df.dtypes.to_dict(),
             'duplicates': self.df.duplicated().sum(),
-            'label_distribution': self.df['label'].value_counts()
+            'label_distribution': {
+                'positive': positive_dist,
+                'negative': negative_dist,
+                'postive_percentage': (positive_dist / len(self.df['labels'])) * 100,
+                'negative_persentage': (negative_dist / len(self.df['lables'])) * 100, 
+            },
+            'text_length': {
+                'avg_words': np.mean(word_counts),
+                'median_words': np.median(word_counts),
+                'min_words': np.min(word_counts),
+                'max_words': np.max(word_counts),
+                'std_words': np.std(word_counts),
+            },
+            'vocabulary': {
+                'unique_words': unique_words,
+                'total_words': total_words,
+                'avg_word_frequency': total_words / unique_words
+            }
         }
 
-        logger.info("Dataset validation finished")
-        return validation_info
+        self.stats = stats
+
+        logger.info("Dataset analysis completed!")
+        logger.info(f"Total samples: {stats['total_samples']}")
+        logger.info(f"Total columns: {stats['total_columns']}")
+        logger.info(f"Columns: {stats['columns']}")
+        logger.info(f"Missing value: {stats['missing_value']}")
+        logger.info(f"Duplicate data: {stats['duplicates']}")
+        logger.info(f"Positive: {stats['label_distribution']['positive']} ({stats['label_distribution']['positive_percentage']:.1}%)")
+        logger.info(f"Negative: {stats['label_distribution']['negative']} ({stats['label_distribution']['negative_percentage']:.1}%)")
+        logger.info(f"Average word per text: {stats['text_length']['avg_words']:.1f}")
+        logger.info(f"Vocabulary size: {stats['vocabulary']['unique_words']}")
+
+        return stats
+    
     
     def get_sample_data(self, n: int = 5) -> pd.DataFrame:
         """
