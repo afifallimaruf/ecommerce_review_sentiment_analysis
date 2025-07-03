@@ -28,7 +28,7 @@ class DataLoader:
         self.config = self._load_config(config_path)
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
-        self.output_dir = Path(self._load_config['data_paths']['output'])
+        self.output_dir = Path(self.config['data_paths']['output'])
         self.df = None
 
         self.stats = {}
@@ -311,10 +311,11 @@ def main():
         print(f"Train data shape: {train_data.shape}")
         print(f"Test data shape: {test_data.shape}")
     
-        # Validasi dataset
-        df_val = loader.validate_dataset()
-        logger.info(df_val)
-        print(df_val)
+        # Analisis dataset
+        stats = loader.analyze_dataset()
+
+        # Buat visualisasi dataset
+        loader.create_visualizations()
 
         # ambil 5 data dari dataset
         data_priview = loader.get_sample_data()
