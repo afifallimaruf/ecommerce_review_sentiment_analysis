@@ -6,6 +6,7 @@ Data loader untuk Amazon Reviews Dataset
 """
 
 
+import os
 import pandas as pd
 import json
 import logging
@@ -16,7 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from collections import Counter, defaultdict
-from typing import Dict
+from typing import Dict, Optional
 warnings.filterwarnings('ignore')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,6 +30,8 @@ class DataLoader:
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
         self.output_dir = Path(self.config['data_paths']['output'])
+        self.processed_data_path = Path(self.config['data_paths']['processed'])
+        
         self.df = None
 
         self.stats = {}
@@ -170,34 +173,52 @@ class DataLoader:
 
         return text
 
-    def analyze_dataset(self) -> Dict:
+    def analyze_dataset(self, df: Optional[pd.DataFrame] = None) -> Dict:
         """
         Analisis statistik pada dataset
+
+        Args: DataFrame opsional untuk di analisis (gunakan self.df jika tidak tersedia)
 
         Returns:
             Dict: Statistik dataset
         """
 
+        if df is not None:
+            self.df = df
+
         logger.info("Analyzing dataset statistics...")
 
-        if self.df is None:
-            raise ValueError("The dataset has not been loaded. Call load_dataset() first")
-
+        total_samples = len(self.df)
+        
         # Distribusi label
-        positive_dist = [len(label) for label in self.df['labels'] if label == 2 ]
-        negative_dist = [len(label) for label in self.df['labels'] if label == 1]
+        label_counts = self.df['labels'].value_counts()
+        positive_count = label_counts.get(2, 0)
+        negative_count = label_counts.get(1, 0)
+
+        chunk_size = 10000
 
         # Analisis text length
-        word_counts = [text.split() for text in self.df['text']]
+        word_counts_list = []
+        vocabulary = Counter()
 
-        all_words = []
-        for text in self.df['text']:
-            all_words.extend(text.split())
-        
-        vocabulary = Counter(all_words)
+        for i in range(0, len(self.df), chunk_size):
+            chunk = self.df['text'].iloc[i:i+chunk_size]
+
+            # proses word counts untuk chunk ini
+            chunk_word_counts = chunk.str.split().str.len()
+            word_counts_list.extend(chunk_word_counts.to_list())
+
+            # Perbarui vocabulary
+            for text in chunk:
+                vocabulary.update(str(text).split())
+
+        # Ubah kedalam  pandas series untuk statistik
+        word_counts = pd.Series(word_counts_list)
+
         unique_words = len(vocabulary)
-        total_words = len(all_words)
+        total_words = sum(vocabulary.values())
 
+        avg_word_prequency = total_words / unique_words if unique_words > 0 else 0
 
         stats = {
             'total_samples': len(self.df['labels']),
@@ -207,10 +228,10 @@ class DataLoader:
             'data_types': self.df.dtypes.to_dict(),
             'duplicates': self.df.duplicated().sum(),
             'label_distribution': {
-                'positive': positive_dist,
-                'negative': negative_dist,
-                'postive_percentage': (positive_dist / len(self.df['labels'])) * 100,
-                'negative_persentage': (negative_dist / len(self.df['lables'])) * 100, 
+                'positive': positive_count,
+                'negative': negative_count,
+                'positive_percentage': (positive_count / total_samples) * 100 if total_samples > 0 else 0,
+                'negative_percentage': (negative_count / total_samples) * 100 if total_samples > 0 else 0, 
             },
             'text_length': {
                 'avg_words': np.mean(word_counts),
@@ -222,7 +243,8 @@ class DataLoader:
             'vocabulary': {
                 'unique_words': unique_words,
                 'total_words': total_words,
-                'avg_word_frequency': total_words / unique_words
+                'most_common_overall': vocabulary.most_common(20),
+                'avg_word_frequency': avg_word_prequency
             }
         }
 
@@ -234,8 +256,8 @@ class DataLoader:
         logger.info(f"Columns: {stats['columns']}")
         logger.info(f"Missing value: {stats['missing_value']}")
         logger.info(f"Duplicate data: {stats['duplicates']}")
-        logger.info(f"Positive: {stats['label_distribution']['positive']} ({stats['label_distribution']['positive_percentage']:.1}%)")
-        logger.info(f"Negative: {stats['label_distribution']['negative']} ({stats['label_distribution']['negative_percentage']:.1}%)")
+        logger.info(f"Positive: {stats['label_distribution']['positive']} ({stats['label_distribution']['positive_percentage']:.1f}%)")
+        logger.info(f"Negative: {stats['label_distribution']['negative']} ({stats['label_distribution']['negative_percentage']:.1f}%)")
         logger.info(f"Average word per text: {stats['text_length']['avg_words']:.1f}")
         logger.info(f"Vocabulary size: {stats['vocabulary']['unique_words']}")
 
@@ -252,9 +274,9 @@ class DataLoader:
             raise ValueError("The dataset has not been loaded. Call load_dataset() first.")
 
         # Set style
-        plt.style.use('seaborn-v0_8')
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle('Amazon Dataset Analysis', fontsize=16, fontweight='bold')
+        plt.style.use('default')
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle('Amazon Dataset Analysis', fontsize=14, fontweight='bold')
 
         # Distribusi label
         labels = ['Negative', 'Positive']
@@ -264,6 +286,43 @@ class DataLoader:
         colors = ['#ff6b6b', '#4ecdc4']
 
         axes[0, 0].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+        axes[0, 0].set_title('Sentiment Distribution')
+
+        # Distribusi Text Length 
+        word_counts = self.df['text'].str.count(r'\S+').fillna(0).astype(int)
+        axes[0, 1].hist(word_counts, bins=50, color='skyblue', alpha=0.7, edgecolor='black')
+        axes[0, 1].set_title('Text Length Distribution (Words)')
+        axes[0, 1].set_xlabel('Number of Words')
+        axes[0, 1].set_ylabel('Frequency')
+        mean_words = np.mean(word_counts)
+        axes[0, 1].axvline(np.mean(mean_words), color='red', linestyle='--', label=f'Mean: {mean_words:.1f}')
+        axes[0, 1].legend()
+
+        # Kata yang paling umum (overall)
+        common_words = self.stats['vocabulary']['most_common_overall'][:15]
+        words, counts = zip(*common_words)
+
+        axes[1, 0].barh(range(len(words)), counts, color='lightcoral')
+        axes[1, 0].set_yticks(range(len(words)))
+        axes[1, 0].set_yticklabels(words)
+        axes[1, 0].set_title('Most Common Words (Overall)')
+        axes[1, 0].set_xlabel('Frequency')
+
+        # Perbandingan sentimen (Positive vs Negative)
+        pos_count = self.stats['label_distribution']['positive']
+        neg_count = self.stats['label_distribution']['negative']
+
+        sentiment_data = ['Positive', 'Negative']
+        sentiment_counts = [pos_count, neg_count]
+
+        bars = axes[1, 1].bar(sentiment_data, sentiment_counts, color=['#4ecdc4', '#ff6b6b'])
+        axes[1, 1].set_title('Review Count by Sentiment')
+        axes[1, 1].set_ylabel('Number of Reviews')
+
+        # Tambahkan label nilai pada bars
+        for bar in bars:
+            height = bar.get_height()
+            axes[1, 1].text(bar.get_x() + bar.get_width()/2., height, f'{height}', ha='center', va='bottom')
 
         plt.tight_layout()
 
@@ -272,6 +331,52 @@ class DataLoader:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         logger.info(f"Visualizations saved to: {plot_path}")
 
+    def save_processed_data(self, df: Optional[pd.DataFrame], context: str = 'train', apply_cleaning: bool = True) -> None:
+        """
+        Menyimpan data yang sudah diproses ke file csv
+        
+        Args:
+            df: file DataFrame
+            context_file: konteks apakah file untuk training atau testing (train/test)
+        
+        """
+
+        self.df = df
+
+        if df is None:
+            raise ValueError("The dataset has not been loaded.")
+        
+        if context not in ['train', 'test']:
+            raise ValueError("The context is wrong. must(train/test)")
+        
+        # Buat folder jika belum ada
+        train_folder = self.processed_data_path / 'training'
+        train_folder.mkdir(exist_ok=True)
+
+        test_folder = self.processed_data_path / 'testing'
+        test_folder.mkdir(exist_ok=True)
+
+        # Alamat untuk file yang akan di save
+        if context == 'train':
+            save_path = train_folder / 'train_processed.csv'
+        else:
+            save_path = test_folder / 'test_processed.csv'
+
+        try:
+            # Buat salinan untuk menghindari perubahan pada file asli
+            df_to_save = self.df.copy()
+            # Jika konteks file untuk training
+            if apply_cleaning and context == 'train':
+                logger.info("Applying text cleaning")
+                # bersihkan teks pada kolom text sebelum disimpan
+                df_to_save['cleaned_text'] = df_to_save['text'].apply(self._clean_text)
+            
+            # Save file dengan menggunakan kompresi data untuk file yang besar
+            df_to_save.to_csv(save_path, index=False, compression='gzip' if len(df_to_save) > 100000 else None)
+            logger.info("The dataset has been saved successfully")
+        except Exception as e:
+            logger.error(f"Error when save dataset: {e}")
+            raise
     
     def get_sample_data(self, n: int = 5) -> pd.DataFrame:
         """
@@ -312,10 +417,14 @@ def main():
         print(f"Test data shape: {test_data.shape}")
     
         # Analisis dataset
-        stats = loader.analyze_dataset()
+        stats = loader.analyze_dataset(train_data)
+
 
         # Buat visualisasi dataset
         loader.create_visualizations()
+
+        loader.save_processed_data(train_data)
+        loader.save_processed_data(test_data, context='test', apply_cleaning=False)
 
         # ambil 5 data dari dataset
         data_priview = loader.get_sample_data()
