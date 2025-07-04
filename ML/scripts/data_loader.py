@@ -14,10 +14,10 @@ import warnings
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Dict, Optional
+from config.config import LoadConfig
 warnings.filterwarnings('ignore')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class DataLoader:
     """Class untuk load dan preprocessing Reviews dataset"""
     def __init__(self, config_path: str = 'config.json'):
-        self.config = self._load_config(config_path)
+        self.config = LoadConfig(config_path=config_path)
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
         self.output_dir = Path(self.config['data_paths']['output'])
@@ -36,18 +36,6 @@ class DataLoader:
 
         self.stats = {}
 
-
-    def _load_config(self, config_path: str) -> Dict:
-        """Load konfigurasi dari JSON file"""
-        try:
-            with open(config_path, 'r') as file:
-                return json.load(file)
-        except FileNotFoundError:
-            return {
-                "data_paths": {
-                    "raw": "data/raw/",
-                }
-            }
     
     def _ft_to_csv(self, file_path: str) -> pd.DataFrame:
         """
