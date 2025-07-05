@@ -150,15 +150,6 @@ class DataLoader:
         # Hapus URLs
         text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
 
-        # Hapus alamat email
-        text = re.sub(r'\S+@\S+', '', text)
-
-        # Pertahankan alphanumeric, spasi, tanda baca dasar
-        text = re.sub(r'[^a-zA-Z0-9\s\.\!\?\,\;\-\'\"]', '', text)
-
-        # Hapus ekstra spasi
-        text = re.sub(r'\s+', ' ', text).strip()
-
         return text
 
     def analyze_dataset(self, df: Optional[pd.DataFrame] = None) -> Dict:
