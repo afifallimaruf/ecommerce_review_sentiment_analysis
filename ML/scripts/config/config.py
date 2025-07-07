@@ -27,3 +27,4 @@ class LoadConfig:
                 return json.load(file)
         except Exception as e:
             logger.error(f"Error when load config file: {e}")
+            
