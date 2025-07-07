@@ -18,10 +18,13 @@ from pathlib import Path
 from collections import Counter
 from typing import Dict, Optional
 from config.config import LoadConfig
+from log.logging import SetupLogging
 warnings.filterwarnings('ignore')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+
+# Konfigurasi sistem logging.
+logger_init = SetupLogging()
+logger = logger_init.set_logger()
 
 class DataLoader:
     """Class untuk load dan preprocessing Reviews dataset"""
