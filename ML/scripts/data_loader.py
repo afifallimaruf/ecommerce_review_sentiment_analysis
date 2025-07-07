@@ -33,7 +33,7 @@ class DataLoader:
         self.base_path = Path(__file__).parent.parent.parent 
         self.raw_data_path = Path(self.config['data_paths']['raw'])
         self.output_dir = Path(self.config['data_paths']['output'])
-        self.processed_data_path = Path(self.config['data_paths']['processed'])
+        self.processed_data_path = Path(self.config['data_paths']['processed']['training'])
         
         self.df = None
 
