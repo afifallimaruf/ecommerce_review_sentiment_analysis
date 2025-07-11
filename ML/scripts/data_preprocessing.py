@@ -540,24 +540,8 @@ class TextPreprocessor:
         
         logger.info(f"Final file saved: {final_file} ({len(final_df)} samples)")
         
-        # Save TF-IDF vectorizer
-        if all_texts:
-            vectorizer = TfidfVectorizer(
-                max_features=self.config['max_features'],
-                min_df=self.config['min_word_freq'],
-                max_df=0.95,  # Remove very common words
-                lowercase=False,  # Already lowercased
-                dtype=np.float32 
-            )
-
-            vectorizer.fit(all_texts)
-
-            vectorizer_path = self.output_dir / 'tfidf_vectorizer.pkl'
-            with open(vectorizer_path, 'wb') as f:
-                pickle.dump(vectorizer, f)
-            logger.info(f"TF-IDF vectorizer saved: {vectorizer_path}")
         
-        # Cleanuo
+        # Cleanup
         del chunk_dataframes
         del all_texts
         del final_df
