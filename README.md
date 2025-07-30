@@ -180,3 +180,10 @@ Penting: Ganti <user>, <password>, <host>, <port>, dan <database_name> dengan de
 
 
 ```
+
+```bash
+# Buat dan aktifkan virtual environment
+python3 -m venv <nama virtual environment>
+source <nama virtual environment>/bin/activate
+
+```
