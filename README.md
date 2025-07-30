@@ -159,31 +159,12 @@ Ikuti langkah-langkah mudah ini untuk menyiapkan dan menjalankan proyek di mesin
 ```bash
 git clone <URL_REPOSITORI_ANDA>
 cd ecommerce-review-sentiment
-
-2. Siapkan Database PostgreSQL
-Pastikan Anda memiliki server PostgreSQL yang berjalan.
-
-Buat database baru, misalnya sentiment_db.
-
-Buat pengguna dan password jika diperlukan, atau gunakan pengguna default (postgres).
-
-3. Konfigurasi Variabel Lingkungan
-Buat file .env di direktori ecommerce-review-sentiment/backend/.
-# backend/.env
-
-FLASK_APP=app.py
-FLASK_ENV=development
-FLASK_RUN_PORT=5000
-DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<database_name>
-
-Penting: Ganti <user>, <password>, <host>, <port>, dan <database_name> dengan detail koneksi PostgreSQL Anda yang sebenarnya. Contoh: postgresql://postgres:mysecretpassword@localhost:5432/sentiment_db.
-
-
 ```
+
+### 2. Buat Virtual Environment
 
 ```bash
 # Buat dan aktifkan virtual environment
 python3 -m venv <nama virtual environment>
 source <nama virtual environment>/bin/activate
-
 ```
