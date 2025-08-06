@@ -28,9 +28,9 @@ logger = logger_init.set_logger()
 
 class DataLoader:
     """Class untuk load dan preprocessing Reviews dataset"""
-    def __init__(self, config_path: str = 'config.json'):
-        self.config = LoadConfig(config_path=config_path)
-        self.base_path = Path(__file__).parent.parent.parent 
+    def __init__(self):
+        self.config_init = LoadConfig()
+        self.config = self.config_init.load_config()
         self.raw_data_path = Path(self.config['data_paths']['raw'])
         self.output_dir = Path(self.config['data_paths']['output'])
         self.processed_data_path = Path(self.config['data_paths']['processed']['training'])
@@ -95,18 +95,22 @@ class DataLoader:
         return self.df
 
 
-    def load_dataset(self, file_name: str) -> pd.DataFrame:
+    def load_dataset(self, file_name: str, use_absolute_path: bool = False) -> pd.DataFrame:
         """
         Load dataset Amazon reviews
         Suports CSV, JSON
 
         Args:
-            file_name: Nama file
+            file_name (str): Nama file
+            use_absolute_path (bool): Jika true, file_name diperlukan sebagai path absolut 
         
             Returns:
                 pandas.DataFrame: Dataset yang sudah di load
         """
-        filepath = self.raw_data_path / file_name
+        if use_absolute_path:
+            filepath = Path(file_name)
+        else:
+            filepath = self.raw_data_path / file_name
 
         try:
             logger.info(f"Loading dataset from: {filepath}")
@@ -132,7 +136,7 @@ class DataLoader:
             logger.error(f"Error when loading dataset: {str(e)}")
             raise
     
-    def _clean_text(self, text: str) -> str:
+    def basic_clean_text(self, text: str) -> str:
         """
         Membersihkan text dari karakter yang tidak diinginkan
 
@@ -354,7 +358,7 @@ class DataLoader:
             if apply_cleaning and context == 'train':
                 logger.info("Applying text cleaning")
                 # bersihkan teks pada kolom text sebelum disimpan
-                df_to_save['cleaned_text'] = df_to_save['text'].apply(self._clean_text)
+                df_to_save['cleaned_text'] = df_to_save['text'].apply(self.basic_clean_text)
             
             # Save file dengan menggunakan kompresi data untuk file yang besar
             df_to_save.to_csv(save_path, index=False, compression='gzip' if len(df_to_save) > 100000 else None)
