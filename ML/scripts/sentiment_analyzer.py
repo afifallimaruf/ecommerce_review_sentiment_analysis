@@ -29,6 +29,8 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from config.config import LoadConfig
 from log.logging import SetupLogging
 
+from data_loader import DataLoader
+
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from scipy.sparse import hstack
@@ -65,7 +67,7 @@ def memory_monitor():
 class SentimentAnalyzer:
     """ Class Sentiment Analyzer """
 
-    def __init__(self, config_path: str = 'config.json'):
+    def __init__(self):
         """
         Inisialisasi class Sentiment Analyzer
 
@@ -73,12 +75,12 @@ class SentimentAnalyzer:
             config_path (str): Alamat ke config.json
         """
 
-        self.config_loader = LoadConfig(config_path=config_path)
+        self.root_path = Path(__file__).resolve().parent.parent
+        self.config_loader = LoadConfig()
         self.config = self.config_loader.load_config()
         self.data_processed_path = Path(self.config['data_paths']['processed']['training'])
         self.output_dir = Path(self.config['data_paths']['output'])
-        self.models_path = Path(self.config['ml_model']['models_path'])
-        self.tfidf_vec_path = Path(self.config['data_paths']['output'])
+        self.models_path = self.root_path / Path(self.config['ml_model']['models_path'])
 
         # Models
         self.models = {}
@@ -94,11 +96,11 @@ class SentimentAnalyzer:
         # Konfigurasi model - menggunakan parameter dari config
         self.model_configs = {
             'logistic': {
-                'classifier': LogisticRegression(random_state=self.config['processing']['random_state']),
+                'classifier': LogisticRegression(random_state=self.config['processing']['random_state'], class_weight='balanced'),
                 'param_grid': self.config['model_params']['logistic']
             },
             'svm': {
-                'classifier': LinearSVC(random_state=self.config['processing']['random_state']),
+                'classifier': LinearSVC(random_state=self.config['processing']['random_state'], class_weight='balanced'),
                 'param_grid': self.config['model_params']['svm']
             },
             'naive_bayes': {
@@ -113,9 +115,9 @@ class SentimentAnalyzer:
 
         logger.info("Sentiment Analyzer initialized")
 
-    def load_processed_data(self) -> Tuple[pd.DataFrame, bool]:
+    def load_processed_data(self, filename: str = 'train_preprocessed.csv.gz') -> Tuple[pd.DataFrame, bool]:
         """
-        Load data yang akan digunakan oleh model
+        Load data yang sudah diproses untuk digunakan oleh model
         
         Returns (Tuple[pd.DataFrame, bool]): DataFrame dan status load (berhasil/tidak)
         """
@@ -123,7 +125,7 @@ class SentimentAnalyzer:
 
         try:
             # Alamat data yang sudah diproses
-            data_file = self.data_processed_path / 'train_preprocessed.csv.gz'
+            data_file = self.data_processed_path / filename
 
             if not data_file.exists():
                 logger.error(f"Data file not found: {data_file}")
@@ -164,19 +166,59 @@ class SentimentAnalyzer:
             bool: Status berhasil tidaknya
         """
         try:
-            vectorizer_path = self.tfidf_vec_path / 'tfidf_vectorizer.pkl'
+            vectorizer_path = self.models_path / 'tfidf_vectorizer.pkl'
 
+            if not vectorizer_path.exists():
+                alternative_paths = [
+                    self.models_path / 'vectorizer.pkl',
+                    self.models_path / 'count_vectorizer.pkl'
+                ]
+
+                for alt_path in alternative_paths:
+                    if alt_path.exists():
+                        vectorizer_path = alt_path
+                        logger.info(f"Founf vectorizer at alternative path: {vectorizer_path}")
+                        break
+
+            
             if vectorizer_path.exists():
                 with open(vectorizer_path, 'rb') as f:
                     self.vectorizer = pickle.load(f)
-                logger.info("Pre-trained vectorizer loaded successfully")
+                
+                # Validasi vectorizer yang dimuat
+                if not hasattr(self.vectorizer, 'vocabulary_'):
+                    logger.error("Loaded vectorizer doesn't have vocabulary_ attribute")
+                    return False
+                
+                if not hasattr(self.vectorizer, 'transform'):
+                    logger.error("Loaded vectorizer doesn't have transform method")
+                    return False
+                
+                vocab_size = len(self.vectorizer.vocabulary_)
+                if vocab_size == 0:
+                    logger.error("LOaded vectorizer has empty vocabulary")
+                    return False
+                
+                logger.info(f"Pre-trained vectorizer loaded successfully from: {vectorizer_path}")
+                logger.info(f"Vectorizer type: {type(self.vectorizer).__name__}")
+                logger.info(f"Vocabulary size: {vocab_size}")
+            
+                # Debug: tampilkan beberapa contoh vocabulary
+                sample_vocab = list(self.vectorizer.vocabulary_.keys())[:10]
+                logger.debug(f"Sample vocabulary: {sample_vocab}")
+
                 return True
             else:
-                logger.warning("Pre-trained vectorizer not found, will create new one")
+                logger.warning(f"Pre-trained vectorizer not found at: {vectorizer_path}")
+                logger.warning("Available files in models directory:")
+                if self.models_path.exists():
+                    for file in self.models_path.iterdir():
+                        logger.warning(f"  - {file.name}")
                 return False
             
         except Exception as e:
             logger.error(f"Error loading vectorizer: {e}")
+            self.vectorizer = None
             return False
         
     
@@ -194,11 +236,11 @@ class SentimentAnalyzer:
         try:
             logger.info("Creating new TF-IDF vectorizer...")
 
-            self.vectorizer = CountVectorizer(
+            self.vectorizer = TfidfVectorizer(
                 max_features=self.config['processing']['max_features'],
                 min_df=self.config['processing']['min_df'],
                 max_df=self.config['processing']['max_df'],
-                ngram_range=self.config['processing']['ngram_range'],
+                ngram_range=tuple(self.config['processing']['ngram_range']),
                 lowercase=False,
                 dtype=np.float32)
 
@@ -218,7 +260,7 @@ class SentimentAnalyzer:
             logger.info(f"Error when creating vectorizer: {e}")
             return False
 
-    def prepare_features(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+    def prepare_features(self, df: pd.DataFrame, predictions: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prepare features untuk training
 
@@ -234,19 +276,17 @@ class SentimentAnalyzer:
             logger.info("Preparing features...")
 
             # TF-IDF features
-            X_tfidf = self.vectorizer.transform(df['tokens'])
-
-            
+            X_tfidf = self.vectorizer.transform(df['tokens'])            
 
             # Pastikan tidak ada nilai negatif
             if hasattr(X_tfidf, 'min'):
                 min_val = X_tfidf.min()
                 if min_val < 0:
-                    logger.warning(f"FOund negative values: {min_val}")
+                    logger.warning(f"Found negative values: {min_val}")
 
                     X_text_dense = X_tfidf.toarray()
                     X_text_dense = np.abs(X_text_dense)
-                    X_text_dense = X_text_dense
+                    X_tfidf = X_text_dense
 
             # Feature tambahan jika tersedia
             if self.config['feature_engineering']['use_feature_engineering']:
@@ -266,7 +306,7 @@ class SentimentAnalyzer:
                         additional_features = self.scaler.fit_transform(additional_features)
                     else:
                         additional_features = self.scaler.transform(additional_features)
-                    
+
                     # Gabung TF-IDF dengan features tambahan
                     X = hstack([X_tfidf, additional_features])
                 else:
@@ -276,19 +316,20 @@ class SentimentAnalyzer:
             else:
                 X = X_tfidf
 
+            if predictions:
+                return X, None
+
             y = df['labels']
 
             y = df['labels'].values
-
-            logger.info(f"Features prepared: {X.shape}")
-
+            
             return X, y
         
         except Exception as e:
             logger.info(f"Error when preparing features: {e}")
             raise
     
-    def train_model(self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
+    def train_single_model(self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
                     X_val: np.ndarray, y_val: np.ndarray) -> Dict:
         """
         Train single model
@@ -419,7 +460,7 @@ class SentimentAnalyzer:
             if model_name in self.model_configs:
                 try:
                     with memory_monitor():
-                        result = self.train_model(model_name, X_train, y_train, X_val, y_val)
+                        result = self.train_single_model(model_name, X_train, y_train, X_val, y_val)
                         results[model_name] = result
 
                         # Cleanup
@@ -568,7 +609,7 @@ class SentimentAnalyzer:
                 axes[i].set_visible(False)
             
             plt.tight_layout()
-            plt.savefig(self.output_dir / 'confusion_matrices.png', dpi=300, bbox_inches='tight')
+            fig.savefig(self.output_dir / 'confusion_matrices.png', dpi=300, bbox_inches='tight')
             plt.close()
 
             logger.info("Visualizations saved to data/output directory")
@@ -577,7 +618,7 @@ class SentimentAnalyzer:
             logger.error(f"Error when creating visualizations: {e}")
 
         
-    def predict(self, texts: List[str], model_name: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def predict(self, texts: np.ndarray, model_name: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prediksi sentiment untuk teks baru
 
@@ -597,24 +638,24 @@ class SentimentAnalyzer:
             else:
                 if self.best_model is None:
                     raise ValueError("No best model selected")
-                model.self.best_model
+                model = self.best_model
             
-            # Transform texts
-            X_tfidf = self.vectorizer.transform(texts)
+            # # Transform texts
+            # X_tfidf = self.vectorizer.transform(texts)
 
-            # Additional features jika digunakan
-            if self.config['feature_engineering']['use_feature_engineering'] and self.scaler:
-                logger.warning("Additional features not implemented for predict prediction")
-                X = X_tfidf
-            else:
-                X = X_tfidf
+            # # Additional features jika digunakan
+            # if self.config['feature_engineering']['use_feature_engineering'] and self.scaler:
+            #     logger.warning("Additional features not implemented for predict prediction")
+            #     X = X_tfidf
+            # else:
+            #     X = X_tfidf
 
             # Predict
-            predictions = model.predict(X)
+            predictions = model.predict(texts)
 
             # Dapatkan probabilites jika tersedia
             if hasattr(model, 'predict_proba'):
-                probabilities = model.predict_proba(X)
+                probabilities = model.predict_proba(texts)
             else:
                 probabilities = None
             
@@ -646,7 +687,6 @@ class SentimentAnalyzer:
             if not self.load_vectorizer():
                 if not self.create_vectorizer(df['tokens'].tolist()):
                     raise ValueError("Failed to create vectorizer")
-                
             # Preapare features
             X, y = self.prepare_features(df)
 
@@ -657,10 +697,7 @@ class SentimentAnalyzer:
                 random_state=self.config['processing']['random_state'],
                 stratify=y
             )
-
-            print(f"X_train: {X_train.shape}")
-            print(f"y_train: {y_train.shape}")
-
+            
             logger.info(f"Training set: {X_train.shape[0]} samples")
             logger.info(f"Validation set: {X_val.shape[0]} samples")
 
@@ -669,17 +706,17 @@ class SentimentAnalyzer:
                 results = self.train_all_models(X_train, y_train, X_val, y_val)
 
                 # Pilih best model
-            best_model_name = self.select_best_model(results)
+                best_model_name = self.select_best_model(results)
 
-            # Save models
-            if self.config['ml_model']['save_models']:
-                self.save_models(results)
+                # Save models
+                if self.config['ml_model']['save_models']:
+                    self.save_models(results)
 
-            # Buat visualisasi
-            self.create_visualizations(results, y_val)
+                # Buat visualisasi
+                self.create_visualizations(results, y_val)
 
-            # Simpan results
-            self.results = results
+                # Simpan results
+                self.results = results
 
             logger.info("Sentiment analysis pipeline completed successfully!")
 
@@ -716,16 +753,27 @@ class SentimentAnalyzer:
             with open(model_path, 'rb') as f:
                 model = pickle.load(f)
 
+            # logger.info(f"Model: {model}")
+
             self.models[model_name] = model
             self.best_model = model
 
             # Load vectorizer dan scaler
-            self.load_vectorizer()
+            vectorizer_success = self.load_vectorizer()
+            if not vectorizer_success:
+                logger.error("Failed to load vectorizer. This will affect keyword extraction.")
+                return False
+
+            logger.info(f"Vectorizer loaded with vocabulary size: {len(self.vectorizer.vocabulary_)}")
 
             scaler_path = self.models_path / 'scaler.pkl'
             if scaler_path.exists():
                 with open(scaler_path, 'rb') as f:
                     self.scaler = pickle.load(f)
+
+            # Validasi final
+            if self.vectorizer is None:
+                logger.error("Vectorizer is None after loading. Check vectorizer file.")
             
             logger.info(f"Model {model_name} load successfully")
             return True
