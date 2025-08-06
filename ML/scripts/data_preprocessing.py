@@ -301,8 +301,8 @@ class TextPreprocessor:
 
         for text in texts:
             try:
-                # Simple split lebih cepat untuk text yang sudah dibersihkan
-                tokens = text.split()
+                # Split teks
+                tokens = word_tokenize(text)
                 
                 # Filter dan lemmatize
                 processed_tokens = []
@@ -318,6 +318,7 @@ class TextPreprocessor:
                     # Apply lemmatization
                     if self.config['apply_lemmatization']:
                         token = self.lemmatizer.lemmatize(token)
+                        # logger.info(f"Token from tokenize_and_process: {token}")
 
                     processed_tokens.append(token)
                 results.append(processed_tokens)
@@ -352,7 +353,7 @@ class TextPreprocessor:
             'uppercase_ratio': uppercase_count / text_len if text_len > 0 else 0
         }
     
-    def preprocess_batch(self, batch_df: pd.DataFrame) -> List[Dict]:
+    def preprocess_batch(self, batch_df: pd.DataFrame, prediction: bool = False) -> List[Dict]:
         """
         Proses batch data
 
@@ -363,38 +364,38 @@ class TextPreprocessor:
         Returns:
             List[Dict]: Output samples yang sudah di proses
         """
-
         # Filter berdasarkan panjang text
-        batch_df = batch_df[
+        initial_filtered_df = batch_df[
             (batch_df['cleaned_text'].str.len() >= self.config['min_text_length']) &
             (batch_df['cleaned_text'].str.len() <= self.config['max_text_length'])
-        ]
+        ].copy()
 
-        if batch_df.empty:
+        if initial_filtered_df.empty:
             return []
 
         # Bersihkan teks dalam batch
-        cleaned_texts = [self.clean_text(text) for text in batch_df['cleaned_text']]
+        cleaned_texts_final = [self.clean_text(text) for text in initial_filtered_df['cleaned_text']]
         
         # Tokenisasi dalam batch
-        all_tokens = self.tokenize_and_process(cleaned_texts)
+        all_tokens = self.tokenize_and_process(cleaned_texts_final)
         
         # Results
         results = []
-        for idx, (_, row) in enumerate(batch_df.iterrows()):
-            tokens = all_tokens[idx]
+        for i, (idx_original, row) in enumerate(initial_filtered_df.iterrows()):
+            tokens = all_tokens[i]
 
             # Skip jika tidak ada token
             if not tokens:
                 continue
 
             # Ekstrak minimal features
-            features = self.extract_features(cleaned_texts[idx], tokens)
+            features = self.extract_features(cleaned_texts_final[i], tokens)
 
+            
             result = {
-                'cleaned_text': cleaned_texts[idx],
+                'original_id': row.get('original_id', idx_original),
+                'cleaned_text': cleaned_texts_final[i],
                 'tokens': ' '.join(tokens),
-                'labels': row['labels'],
                 'word_count': features['word_count'],
                 'char_count': features['char_count'],
                 'exclamation_count': features['exclamation_count'],
@@ -402,7 +403,12 @@ class TextPreprocessor:
                 'uppercase_ratio': features['uppercase_ratio'],
             }
 
+            # Tambahkan label hanya jika bukan mode prediksi
+            if not prediction and 'labels' in row:
+                result['labels'] = row['labels'] # Pastikan nama kolom label Anda benar (misal 'labels' atau 'sentiment')
+            
             results.append(result)
+            
         return results
     
     def process_chunk(self, chunk_df: pd.DataFrame) -> pd.DataFrame:
@@ -419,7 +425,6 @@ class TextPreprocessor:
         
         # Hapus data duplikat
         chunk_df = chunk_df.drop_duplicates(subset=['cleaned_text']).reset_index(drop=True)
-        
         
         # Proses sampel
         batch_size = self.config['batch_size']
@@ -448,7 +453,7 @@ class TextPreprocessor:
         logger.info(f"Chunk {self.chunk_counter + 1} completed: {len(all_processed_samples)} samples processed")
         # Convert ke dataframe
         if all_processed_samples:
-            processed_df = pd.DataFrame(all_processed_samples)        
+            processed_df = pd.DataFrame(all_processed_samples)    
     
             processed_df['labels'] = processed_df['labels'].astype('int8')
             processed_df['word_count'] = processed_df['word_count'].astype('int16')
